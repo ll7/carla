@@ -11,13 +11,15 @@ if [ -f "${FBX2OBJ_DIST}/FBX2OBJ" ]; then
   log "FBX SDK already installed."
   exit
 fi
-
 LIB_NAME=fbx202001_fbxsdk_linux
 FBXSDK_URL=https://www.autodesk.com/content/dam/autodesk/www/adn/fbx/2020-0-1/${LIB_NAME}.tar.gz
 
 if [ ! -d "${FBX2OBJ_DEP_FOLDER}" ]; then
   log "Downloading FBX SDK..."
-  wget -c "${FBXSDK_URL}" -P "${CARLA_DOCKER_UTILS_FOLDER}"
+  wget --user-agent="Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:94.0) Gecko/20100101 Firefox/94.0" \
+      -c "${FBXSDK_URL}" -P "${CARLA_DOCKER_UTILS_FOLDER}"
+  # info: need to fake accessing from a Firefox browser, so the server doesn't return 403 forbidden
+  # see https://github.com/carla-simulator/carla/issues/4862
 
   echo "Unpacking..."
   mkdir -p "${FBX2OBJ_DEP_FOLDER}"

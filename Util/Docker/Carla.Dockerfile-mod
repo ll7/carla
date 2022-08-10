@@ -1,0 +1,39 @@
+FROM carla-prerequisites:latest as build-env
+
+ARG CARLA_REPO=https://github.com/Bonifatius94/carla
+ARG CARLA_BRANCH=keep-scoomatic-resources-during-update
+
+USER carla
+WORKDIR /home/carla
+
+# TODO: don't clone, use the locally checked out repo via ADD command instead
+RUN if [ -z ${CARLA_BRANCH+x} ]; then git clone --depth 1 $CARLA_REPO; \
+    else git clone --depth 1 --branch $CARLA_BRANCH $CARLA_REPO; fi
+
+WORKDIR /home/carla/carla
+RUN ./Update.sh
+RUN make CarlaUE4Editor
+RUN make PythonAPI
+RUN make build.utils
+RUN make package
+# TODO: chain this in one RUN and remove the temporary build files afterwards
+#       -> make the docker layer smaller
+
+FROM nvidia/vulkan:1.1.121-cuda-10.1--ubuntu18.04 as runtime
+
+RUN useradd -m carla
+WORKDIR /home/carla
+COPY --from=build-env --chown=carla:carla /home/carla/carla/Dist/CARLA_Shipping_*/LinuxNoEditor .
+
+RUN apt-key adv --fetch-keys \
+    https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/3bf863cc.pub && \
+    apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
+        libsdl2-2.0 xserver-xorg libvulkan1 libomp5 --no-install-recommends && \
+    apt-get install -y \
+        xdg-user-dirs xdg-utils && \
+    apt-get clean
+
+USER carla
+EXPOSE 2000-2002
+ENTRYPOINT ["/bin/bash", "CarlaUE4.sh"]
+CMD ["-RenderOffScreen"]
