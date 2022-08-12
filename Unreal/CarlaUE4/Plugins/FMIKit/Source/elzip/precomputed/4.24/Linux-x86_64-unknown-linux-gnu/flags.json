@@ -1,0 +1,7 @@
+{
+    "defines": [],
+    "system_libs": [],
+    "unreal_modules": [
+        "zlib"
+    ]
+}

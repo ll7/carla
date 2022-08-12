@@ -1,0 +1,12 @@
+{
+    "defines": [
+        "LZMA_API_STATIC"
+    ],
+    "system_libs": [
+        "pthread",
+        "pthread"
+    ],
+    "unreal_modules": [
+        "zlib"
+    ]
+}
