@@ -66,9 +66,7 @@ namespace learning {
 
   WheelOutput GetWheelTensorOutput(
       const at::Tensor &particle_forces, 
-      const at::Tensor &wheel_forces) {
-    std::ostringstream oss;
-    std::cout << oss.str() << std::endl;
+      const at::Tensor &wheel_forces ) {
     WheelOutput result;
     const float* wheel_forces_data = wheel_forces.data_ptr<float>();
     result.wheel_forces_x = wheel_forces_data[0];
@@ -89,11 +87,6 @@ namespace learning {
       result._particle_forces.emplace_back(
           particle_forces_data[i*num_dimensions + 2]);
     }
-    if(num_particles > 0)
-    {
-      std::cout << particle_forces_data[0] << " " << particle_forces_data[1] << " " << particle_forces_data[0] << std::endl;
-    }
-    std::cout << "Output: " <<  result._particle_forces.size()/3 << " particles" << std::endl;
     return result;
   }
 
@@ -117,24 +110,15 @@ namespace learning {
       result._particle_forces.emplace_back(
           particle_forces_data[i*num_dimensions + 2]);
     }
-    if(num_particles > 0)
-    {
-      std::cout << particle_forces_data[0] << " " << particle_forces_data[1] << " " << particle_forces_data[0] << std::endl;
-    }
-    // std::cout << "Output: " <<  result._particle_forces.size()/3 << " particles" << std::endl;
     return result;
   }
 
   // holds the neural network
   struct NeuralModelImpl
   {
-    NeuralModelImpl(){
-      // std::cout << "Creating model" << std::endl;
-    }
+    NeuralModelImpl(){}
     torch::jit::script::Module module;
-    ~NeuralModelImpl(){
-      // std::cout << "Destroying model" << std::endl;
-    }
+    ~NeuralModelImpl(){}
     std::vector<at::Tensor> particles_position_tensors;
     std::vector<at::Tensor> particles_velocity_tensors;
     torch::jit::IValue GetWheelTensorInputsCUDA(WheelInput& wheel, int wheel_idx);
@@ -182,8 +166,8 @@ namespace learning {
     try {
       Model->module = torch::jit::load(filename_str);
       std::string cuda_str = "cuda:" + std::to_string(device);
-      std::cout << "Using CUDA device " << cuda_str << std::endl;
-      Model->module.to(at::Device(cuda_str));
+      // std::cout << "Using CUDA device " << cuda_str << std::endl;
+      // Model->module.to(at::Device(cuda_str));
     } catch (const c10::Error& e) {
       std::cout << "Error loading model: " << e.msg() << std::endl;
     }
@@ -204,6 +188,9 @@ namespace learning {
     auto drv_inputs = torch::tensor(
         {_input.steering, _input.throttle, _input.braking}, torch::kFloat32); //steer, throtle, brake
     TorchInputs.push_back(drv_inputs);
+    if (_input.terrain_type >= 0) {
+      TorchInputs.push_back(_input.terrain_type);
+    }
     TorchInputs.push_back(_input.verbose);
 
     torch::jit::IValue Output;
@@ -215,13 +202,13 @@ namespace learning {
 
     std::vector<torch::jit::IValue> Tensors =  Output.toTuple()->elements();
     _output.wheel0 = GetWheelTensorOutput(
-        Tensors[0].toTensor().cpu(), Tensors[4].toTensor().cpu());
+        Tensors[0].toTensor().cpu(), Tensors[4].toTensor().cpu() );
     _output.wheel1 = GetWheelTensorOutput(
-        Tensors[1].toTensor().cpu(), Tensors[5].toTensor().cpu());
+        Tensors[1].toTensor().cpu(), Tensors[5].toTensor().cpu() );
     _output.wheel2 = GetWheelTensorOutput(
-        Tensors[2].toTensor().cpu(), Tensors[6].toTensor().cpu());
+        Tensors[2].toTensor().cpu(), Tensors[6].toTensor().cpu() );
     _output.wheel3 = GetWheelTensorOutput(
-        Tensors[3].toTensor().cpu(), Tensors[7].toTensor().cpu());
+        Tensors[3].toTensor().cpu(), Tensors[7].toTensor().cpu() );
 
   }
   void NeuralModel::ForwardDynamic() {
@@ -235,6 +222,9 @@ namespace learning {
       auto drv_inputs = torch::tensor(
           {_input.steering, _input.throttle, _input.braking}, torch::kFloat32); //steer, throtle, brake
       TorchInputs.push_back(drv_inputs);
+      if (_input.terrain_type >= 0) {
+        TorchInputs.push_back(_input.terrain_type);
+      }
       TorchInputs.push_back(_input.verbose);
 
       torch::jit::IValue Output;
@@ -270,6 +260,9 @@ namespace learning {
     auto drv_inputs = torch::tensor(
         {_input.steering, _input.throttle, _input.braking}, torch::kFloat32); //steer, throtle, brake
     TorchInputs.push_back(drv_inputs.cuda());
+    if (_input.terrain_type >= 0) {
+      TorchInputs.push_back(_input.terrain_type);
+    }
     TorchInputs.push_back(_input.verbose);
 
     torch::jit::IValue Output;
@@ -281,13 +274,13 @@ namespace learning {
 
     std::vector<torch::jit::IValue> Tensors =  Output.toTuple()->elements();
     _output.wheel0 = GetWheelTensorOutput(
-        Tensors[0].toTensor().cpu(), Tensors[4].toTensor().cpu());
+        Tensors[0].toTensor().cpu(), Tensors[4].toTensor().cpu() );
     _output.wheel1 = GetWheelTensorOutput(
-        Tensors[1].toTensor().cpu(), Tensors[5].toTensor().cpu());
+        Tensors[1].toTensor().cpu(), Tensors[5].toTensor().cpu() );
     _output.wheel2 = GetWheelTensorOutput(
-        Tensors[2].toTensor().cpu(), Tensors[6].toTensor().cpu());
+        Tensors[2].toTensor().cpu(), Tensors[6].toTensor().cpu() );
     _output.wheel3 = GetWheelTensorOutput(
-        Tensors[3].toTensor().cpu(), Tensors[7].toTensor().cpu());
+        Tensors[3].toTensor().cpu(), Tensors[7].toTensor().cpu() );
   }
   
   Outputs& NeuralModel::GetOutputs() {

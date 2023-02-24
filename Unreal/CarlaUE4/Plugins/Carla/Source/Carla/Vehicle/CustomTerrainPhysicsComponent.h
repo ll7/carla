@@ -29,6 +29,16 @@ THIRD_PARTY_INCLUDES_END
 
 #include "CustomTerrainPhysicsComponent.generated.h"
 
+
+UENUM(BlueprintType)
+enum EDefResolutionType
+{
+  E256M = 0   UMETA(DisplayName = "256M"),
+  E512M = 1   UMETA(DisplayName = "512M"),
+  E1K = 2     UMETA(DisplayName = "1K"),
+  E2K = 3     UMETA(DisplayName = "2K"),
+};
+
 UCLASS(BlueprintType)
 class UHeightMapDataAsset : public UPrimaryDataAsset
 {
@@ -39,7 +49,7 @@ public:
   int SizeX = 0;
   UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = HeightMapDataAsset)
   int SizeY = 0;
-  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = HeightMapDataAsset)
+  UPROPERTY(BlueprintReadWrite, Category = HeightMapDataAsset)
   TArray<float> HeightValues;
 };
 
@@ -52,12 +62,6 @@ struct FParticle
 
 struct FHeightMapData
 {
-  void InitializeHeightmap(
-      UTexture2D* Texture, FDVector Size, FDVector Origin,
-      float MinHeight, float MaxHeight, FDVector Tile0, float ScaleZ);
-  void InitializeHeightmapFloat(
-      UTexture2D* Texture, FDVector Size, FDVector Origin,
-      float MinHeight, float MaxHeight, FDVector Tile0, float ScaleZ);
   void InitializeHeightmap(
       UHeightMapDataAsset* DataAsset, FDVector Size, FDVector Origin,
       FDVector Tile0, float ScaleZ);
@@ -89,15 +93,18 @@ struct FDenseTile
   void GetParticlesInRadius(FDVector Position, float Radius, std::vector<FParticle*> &ParticlesInRadius);
   void GetParticlesInBox(const FOrientedBox& OBox, std::vector<FParticle*> &ParticlesInRadius);
   void GetAllParticles(std::vector<FParticle*> &ParticlesInRadius);
+  void InitializeDataStructure();
 
   void UpdateLocalHeightmap();
   std::vector<FParticle> Particles;
   std::vector<float> ParticlesHeightMap;
-  //std::vector<std::vector<float>> ParticlesZOrdered;
   std::vector<std::multiset<float,std::greater<float>>> ParticlesZOrdered;
+  bool bParticlesZOrderedInitialized = false;
   FDVector TilePosition;
   FString SavePath;
   bool bHeightmapNeedToUpdate = false;
+  uint32_t PartialHeightMapSize = 0;
+  uint32_t TileSize = 0;
 };
 
 class FSparseHighDetailMap
@@ -108,12 +115,14 @@ public:
   FSparseHighDetailMap(float ParticleDiameter = 0.02f, float Depth = 0.4f)
     : ParticleSize(ParticleDiameter), TerrainDepth(Depth) {};
 
-  void Init( uint32 NewTextureSize, float NewAffectedRadius, float ParticleDiameter, float Depth)
+  void Init( uint32 NewTextureSize, float NewAffectedRadius, float ParticleDiameter, 
+    float Depth, float NewFloorHeight )
   {
     ParticleSize = ParticleDiameter;
     TerrainDepth = Depth;
     TextureSize = NewTextureSize;
     AffectedRadius = NewAffectedRadius;
+    FloorHeight = NewFloorHeight;
     UE_LOG(LogCarla, Warning, 
         TEXT("ParticleSize %f"), ParticleSize);
   }
@@ -126,7 +135,6 @@ public:
   std::vector<FParticle*> GetParticlesInTileRadius(FDVector Position, float Radius);
   std::vector<FParticle*> GetParticlesInBox(const FOrientedBox& OBox);
   std::vector<uint64_t> GetIntersectingTiles(const FOrientedBox& OBox);
-  std::vector<float> GetParticlesHeightMapInTileRadius(FDVector Position, float Radius);
   std::vector<uint64_t> GetLoadedTilesInRange(FDVector Position, float Radius);
 
 
@@ -150,21 +158,12 @@ public:
     return Heightmap.GetHeight(Position);
   }
 
-  void InitializeMap(UTexture2D* HeightMapTexture,
-      FDVector Origin, FDVector MapSize, float Size, float MinHeight, float MaxHeight,
-      float ScaleZ);
   void InitializeMap(UHeightMapDataAsset* DataAsset,
       FDVector Origin, FDVector MapSize, float Size, float ScaleZ);
 
-  void UpdateHeightMap(UTexture2D* HeightMapTexture,
-      FDVector Origin, FDVector MapSize, float Size, float MinHeight, float MaxHeight,
-      float ScaleZ);
   void UpdateHeightMap(UHeightMapDataAsset* DataAsset,
       FDVector Origin, FDVector MapSize, float Size, float ScaleZ);
 
-  void LoadTilesAtPositionFromCache(FDVector Position, float RadiusX = 100.0f, float RadiusY = 100.0f);
-  void UnLoadTilesAtPositionToCache(FDVector Position, float RadiusX = 100.0f, float RadiusY = 100.0f);
-  void ReloadCache(FDVector Position, float RadiusX = 100.0f, float RadiusY = 100.0f);
   void UpdateMaps(FDVector Position, float RadiusX, float RadiusY, float CacheRadiusX, float CacheRadiusY);
 
   void Update(FVector Position, float RadiusX, float RadiusY);
@@ -205,6 +204,7 @@ public:
   std::unordered_map<uint64_t, FDenseTile> Map;
   std::unordered_map<uint64_t, FDenseTile> CacheMap;
   FString SavePath;
+  FCriticalSection Lock_Particles;
 private:
   std::unordered_map<uint64_t, FDenseTile> TilesToWrite;
   FDVector Tile0Position;
@@ -213,6 +213,7 @@ private:
   FHeightMapData Heightmap;
   float ParticleSize = 0.02f;
   float TerrainDepth = 0.4f;
+  float FloorHeight = 0.0f;
   uint32 TextureSize = 0;
   float AffectedRadius = 0.0f;
   FVector PositionToUpdate;
@@ -235,7 +236,7 @@ struct FForceAtLocation
 };
 
 UCLASS( ClassGroup=(Custom), meta=(BlueprintSpawnableComponent) )
-class UCustomTerrainPhysicsComponent : public UActorComponent
+class CARLA_API UCustomTerrainPhysicsComponent : public UActorComponent
 {
   GENERATED_BODY()
   friend struct FTilesWorker;
@@ -256,9 +257,6 @@ public:
   void AddForces(const TArray<FForceAtLocation> &Forces);
 
   UFUNCTION(BlueprintCallable)
-  TArray<float> BuildLandscapeHeightMap(ALandscapeProxy* Landscape, int Resolution);
-
-  UFUNCTION(BlueprintCallable)
   static void BuildLandscapeHeightMapDataAasset(ALandscapeProxy* Landscape, 
       int Resolution, FVector MapSize, FString AssetPath, FString AssetName);
 
@@ -275,17 +273,7 @@ public:
   FVector GetTileCenter(FVector Position);
 
   UFUNCTION(BlueprintCallable, Category="Tiles")
-  void LoadTilesAtPosition(FVector Position, float RadiusX = 100.0f, float RadiusY = 100.0f);
-
-  UFUNCTION(BlueprintCallable, Category="Tiles")
   void UpdateMaps(FVector Position, float RadiusX, float RadiusY, float CacheRadiusX, float CacheRadiusY);
-
-  UFUNCTION(BlueprintCallable, Category="Tiles")
-  void UnloadTilesAtPosition(FVector Position, float RadiusX = 100.0f, float RadiusY = 100.0f);
-
-
-  UFUNCTION(BlueprintCallable, Category="Tiles")
-  void ReloadCache(FVector Position, float RadiusX = 100.0f, float RadiusY = 100.0f);
 
   UFUNCTION(BlueprintCallable, Category="Texture")
   void InitTexture();
@@ -293,8 +281,6 @@ public:
   UFUNCTION(BlueprintCallable, Category="Texture")
   void UpdateTexture();
 
-  UFUNCTION(BlueprintCallable, Category="Texture")
-  void UpdateTextureData();
   UFUNCTION(BlueprintCallable, Category="Texture")
   void UpdateLoadedTextureDataRegions();
   
@@ -306,9 +292,6 @@ public:
   
   UFUNCTION(BlueprintCallable, Category="Texture")
   void UpdateLargeTextureData();
-
-  UPROPERTY(EditAnywhere, BlueprintReadWrite)
-  UTexture2D *HeightMap;
 
   UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="MaterialParameters")
   UTexture2D* TextureToUpdate;
@@ -338,9 +321,14 @@ public:
   float ForceMulFactor = 1.0;
   UPROPERTY(EditAnywhere, BlueprintReadWrite)
   float ParticleForceMulFactor = 1.0;
+  UPROPERTY(EditAnywhere, BlueprintReadWrite)
+  int SoilType = 0;
+  UPROPERTY(EditAnywhere, BlueprintReadWrite)
+  bool bUseSoilType = false;
   UPROPERTY(EditAnywhere)
   bool NNVerbose = false;
-
+  UPROPERTY(EditAnywhere, BlueprintReadWrite)
+  bool bUseLocalFrame = false;
 private:
 
   void RunNNPhysicsSimulation(
@@ -348,7 +336,8 @@ private:
   // TArray<FParticle*> GetParticlesInRange(...);
   void SetUpParticleArrays(std::vector<FParticle*>& ParticlesIn, 
       TArray<float>& ParticlePosOut, 
-      TArray<float>& ParticleVelOut);
+      TArray<float>& ParticleVelOut,
+      const FTransform &WheelTransform);
   void SetUpWheelArrays(ACarlaWheeledVehicle *Vehicle, int WheelIdx,
       TArray<float>& WheelPos, 
       TArray<float>& WheelOrientation, 
@@ -356,7 +345,7 @@ private:
       TArray<float>& WheelAngularVelocity);
   void UpdateParticles(
       std::vector<FParticle*> Particles, std::vector<float> Forces,
-      float DeltaTime);
+      float DeltaTime, const FTransform& WheelTransform);
   void ApplyForcesToVehicle(
       ACarlaWheeledVehicle *Vehicle,
       FVector ForceWheel0, FVector ForceWheel1, FVector ForceWheel2, FVector ForceWheel3,
@@ -372,6 +361,8 @@ private:
   void LimitParticlesPerWheel(std::vector<FParticle*> &Particles);
   void DrawParticles(UWorld* World, std::vector<FParticle*>& Particles, 
       FLinearColor Color = FLinearColor(1.f, 0.f, 0.f));
+  void DrawParticlesArray(UWorld* World, TArray<float>& ParticlesArray, 
+      FLinearColor Color = FLinearColor(1.f, 0.f, 0.f));
   void DrawOrientedBox(UWorld* World, const TArray<FOrientedBox>& Boxes);
   void DrawTiles(UWorld* World, const std::vector<uint64_t>& TilesIds, float Height = 0,
     FLinearColor Color = FLinearColor(0.0,1.0,0.0,1.0));
@@ -383,10 +374,16 @@ private:
 
   void UpdateParticlesDebug(std::vector<FParticle*> Particles);
   
+  void OnLevelAddedToWorld(ULevel* InLevel, UWorld* InWorld);
+  
   void UpdateTilesHeightMaps( const std::vector<FParticle*>& Particles);
   void RemoveParticlesFromOrderedContainer(const std::vector<FParticle*>& Particles);
   void AddParticlesToOrderedContainer(const std::vector<FParticle*>& Particles);
+  void FlagTilesToRedoOrderedContainer(const std::vector<FParticle*>& Particles);
   void UpdateTilesHeightMapsInRadius(FDVector Position, uint32 Rad );
+  
+  void AddForceToSingleWheel(USkeletalMeshComponent* SkeletalMeshComponent,
+    FVector WheelPosition, FVector WheelNormalForce);
   
   UPROPERTY(EditAnywhere)
   TArray<FForceAtLocation> ForcesToApply;
@@ -394,10 +391,14 @@ private:
   UPrimitiveComponent* RootComponent;
   UPROPERTY(EditAnywhere)
   float RayCastRange = 10.0f;
-  UPROPERTY(EditAnywhere)
-  FVector WorldSize = FVector(200000,200000,0);
 
 public:
+  UPROPERTY(EditAnywhere)
+  FVector WorldSize = FVector(200000,200000,0);
+  UPROPERTY(EditAnywhere)
+  bool DrawDebugInfo = true;
+  UPROPERTY(EditAnywhere)
+  bool bUpdateParticles = false;
   // Radius of the data loaded in memory
   UPROPERTY(EditAnywhere, Category="Tiles")
   FVector TileRadius = FVector( 100, 100, 0 );
@@ -408,6 +409,8 @@ public:
   bool bDrawLoadedTiles = false;
   UPROPERTY(EditAnywhere, Category="Tiles")
   int32 TileSize = 1;
+  UPROPERTY(EditAnywhere, Category="Tiles")
+  bool bRemoveLandscapeColliders = false;
 private:
   // TimeToTriggerCacheReload In seconds
   UPROPERTY(EditAnywhere, Category="Tiles")
@@ -427,6 +430,13 @@ private:
   UPROPERTY(EditAnywhere, Category="MaterialParameters")
   float EffectMultiplayer = 10.0f;
 
+  UPROPERTY(EditAnywhere, Category="MaterialParameters")
+  TEnumAsByte<EDefResolutionType> ChosenRes = EDefResolutionType::E1K;
+  UPROPERTY(EditAnywhere, Category="MaterialParameters")
+  TMap<TEnumAsByte<EDefResolutionType>, UTexture2D*> TexturesRes;
+
+  bool bVisualization = false;
+
   UPROPERTY(EditAnywhere, Category="DeformationMesh")
   bool bUseDeformationPlane = false;
   UPROPERTY(EditAnywhere, Category="DeformationMesh")
@@ -438,9 +448,10 @@ private:
 
   UPROPERTY()
   UMaterialParameterCollectionInstance* MPCInstance;
+
+  UPROPERTY(EditAnywhere, Category="Forces")
+  float NormalForceIntensity = 100;
   
-
-
   UPROPERTY(EditAnywhere)
   float SearchRadius = 100;
   UPROPERTY(EditAnywhere)
@@ -449,8 +460,6 @@ private:
   float TerrainDepth = 40;
   UPROPERTY(EditAnywhere)
   AActor *FloorActor = nullptr;
-  UPROPERTY(EditAnywhere)
-  bool bUpdateParticles = false;
   UPROPERTY(EditAnywhere)
   bool bUseDynamicModel = false;
   UPROPERTY(EditAnywhere)
@@ -474,8 +483,6 @@ private:
   float FloorHeight = 0.f;
   UPROPERTY(EditAnywhere)
   bool bUseImpulse = false;
-  UPROPERTY(EditAnywhere)
-  bool DrawDebugInfo = true;
   UPROPERTY(EditAnywhere)
   bool bUseMeanAcceleration = false;
   UPROPERTY(EditAnywhere)

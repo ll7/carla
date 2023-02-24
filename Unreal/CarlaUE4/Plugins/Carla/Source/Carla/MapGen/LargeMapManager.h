@@ -156,6 +156,8 @@ public:
 
   float GetTileSize();
 
+  FVector GetTile0Offset();
+
   void SetLayerStreamingDistance(float Distance);
 
   void SetActorStreamingDistance(float Distance);
@@ -195,7 +197,11 @@ public:
 
   FCarlaMapTile& LoadCarlaMapTile(FString TileMapPath, TileID TileId);
 
+  ACarlaWheeledVehicle* GetHeroVehicle();
+
 protected:
+
+  void RemoveLandscapeCollisionIfHaveTerraMechanics(ULevel* InLevel);
 
   void UpdateTilesState();
 
@@ -246,6 +252,9 @@ protected:
   // TODO: support rebase in more than one hero vehicle
   UPROPERTY(VisibleAnywhere, Category = "Large Map Manager")
   TArray<AActor*> ActorsToConsider;
+
+  UPROPERTY(VisibleAnywhere, Category = "Large Map Manager")
+  AActor* Spectator = nullptr;
   //UPROPERTY(VisibleAnywhere, Category = "Large Map Manager")
   TArray<FCarlaActor::IdType> ActiveActors;
   TArray<FCarlaActor::IdType> DormantActors;
@@ -291,6 +300,9 @@ protected:
   float TileSide = 2.0f * 1000.0f * 100.0f; // 2km
 
   UPROPERTY(EditAnywhere, Category = "Large Map Manager")
+  FVector LocalTileOffset = FVector(0,0,0);
+
+  UPROPERTY(EditAnywhere, Category = "Large Map Manager")
   bool ShouldTilesBlockOnLoad = false;
 
 
@@ -325,5 +337,8 @@ protected:
 
   UPROPERTY(EditAnywhere, Category = "Large Map Manager")
   bool bPrintErrors = false;
+
+  UPROPERTY(VisibleAnywhere, Category = "Large Map Manager")
+  bool bHasTerramechanics = false;
 
 };
