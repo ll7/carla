@@ -17,12 +17,15 @@
 #include "Carla/Vehicle/MovementComponents/ChronoMovementComponent.h"
 #include "Carla/Traffic/TrafficLightBase.h"
 #include "Carla/Game/CarlaStatics.h"
+#include "Components/CapsuleComponent.h"
 
 #include <compiler/disable-ue4-macros.h>
+#include <carla/rpc/AckermannControllerSettings.h>
 #include "carla/rpc/LabelledPoint.h"
 #include <carla/rpc/LightState.h>
 #include <carla/rpc/MapInfo.h>
 #include <carla/rpc/MapLayer.h>
+#include <carla/rpc/VehicleAckermannControl.h>
 #include <carla/rpc/VehicleControl.h>
 #include <carla/rpc/VehiclePhysicsControl.h>
 #include <carla/rpc/VehicleLightState.h>
@@ -576,6 +579,18 @@ ECarlaServerResponse FCarlaActor::SetActorSimulatePhysics(bool bEnabled)
   return ECarlaServerResponse::Success;
 }
 
+ECarlaServerResponse FCarlaActor::SetActorCollisions(bool bEnabled)
+{
+  if (IsDormant())
+  {
+  }
+  else
+  {
+    GetActor()->SetActorEnableCollision(bEnabled);
+  }
+  return ECarlaServerResponse::Success;
+}
+
 ECarlaServerResponse FCarlaActor::SetActorEnableGravity(bool bEnabled)
 {
   if (IsDormant())
@@ -644,6 +659,25 @@ ECarlaServerResponse FVehicleActor::GetPhysicsControl(FVehiclePhysicsControl& Ph
       return ECarlaServerResponse::NotAVehicle;
     }
     PhysicsControl = Vehicle->GetVehiclePhysicsControl();
+  }
+  return ECarlaServerResponse::Success;
+}
+
+ECarlaServerResponse FVehicleActor::GetFailureState(carla::rpc::VehicleFailureState& FailureState)
+{
+  if (IsDormant())
+  {
+    FVehicleData* ActorData = GetActorData<FVehicleData>();
+    FailureState = ActorData->FailureState;
+  }
+  else
+  {
+    auto Vehicle = Cast<ACarlaWheeledVehicle>(GetActor());
+    if (Vehicle == nullptr)
+    {
+      return ECarlaServerResponse::NotAVehicle;
+    }
+    FailureState = Vehicle->GetFailureState();
   }
   return ECarlaServerResponse::Success;
 }
@@ -799,6 +833,7 @@ ECarlaServerResponse FVehicleActor::ApplyControlToVehicle(
   {
     FVehicleData* ActorData = GetActorData<FVehicleData>();
     ActorData->Control = Control;
+    ActorData->bAckermannControlActive = false;
   }
   else
   {
@@ -808,6 +843,27 @@ ECarlaServerResponse FVehicleActor::ApplyControlToVehicle(
       return ECarlaServerResponse::NotAVehicle;
     }
     Vehicle->ApplyVehicleControl(Control, Priority);
+  }
+  return ECarlaServerResponse::Success;
+}
+
+ECarlaServerResponse FVehicleActor::ApplyAckermannControlToVehicle(
+      const FVehicleAckermannControl& AckermannControl, const EVehicleInputPriority& Priority)
+{
+  if (IsDormant())
+  {
+    FVehicleData* ActorData = GetActorData<FVehicleData>();
+    ActorData->AckermannControl = AckermannControl;
+    ActorData->bAckermannControlActive = true;
+  }
+  else
+  {
+    auto Vehicle = Cast<ACarlaWheeledVehicle>(GetActor());
+    if (Vehicle == nullptr)
+    {
+      return ECarlaServerResponse::NotAVehicle;
+    }
+    Vehicle->ApplyVehicleAckermannControl(AckermannControl, Priority);
   }
   return ECarlaServerResponse::Success;
 }
@@ -827,6 +883,66 @@ ECarlaServerResponse FVehicleActor::GetVehicleControl(FVehicleControl& VehicleCo
       return ECarlaServerResponse::NotAVehicle;
     }
     VehicleControl = Vehicle->GetVehicleControl();
+  }
+  return ECarlaServerResponse::Success;
+}
+
+ECarlaServerResponse FVehicleActor::GetVehicleAckermannControl(FVehicleAckermannControl& VehicleAckermannControl)
+{
+  if (IsDormant())
+  {
+    FVehicleData* ActorData = GetActorData<FVehicleData>();
+    VehicleAckermannControl = ActorData->AckermannControl;
+  }
+  else
+  {
+    auto Vehicle = Cast<ACarlaWheeledVehicle>(GetActor());
+    if (Vehicle == nullptr)
+    {
+      return ECarlaServerResponse::NotAVehicle;
+    }
+    VehicleAckermannControl = Vehicle->GetVehicleAckermannControl();
+  }
+  return ECarlaServerResponse::Success;
+}
+
+ECarlaServerResponse FVehicleActor::GetAckermannControllerSettings(
+  FAckermannControllerSettings& AckermannSettings)
+{
+  if (IsDormant())
+  {
+    FVehicleData* ActorData = GetActorData<FVehicleData>();
+    AckermannSettings = ActorData->AckermannControllerSettings;
+  }
+  else
+  {
+    auto Vehicle = Cast<ACarlaWheeledVehicle>(GetActor());
+    if (Vehicle == nullptr)
+    {
+      return ECarlaServerResponse::NotAVehicle;
+    }
+    AckermannSettings = Vehicle->GetAckermannControllerSettings();
+  }
+  return ECarlaServerResponse::Success;
+}
+
+ECarlaServerResponse FVehicleActor::ApplyAckermannControllerSettings(
+      const FAckermannControllerSettings& AckermannSettings)
+{
+  if (IsDormant())
+  {
+    FVehicleData* ActorData = GetActorData<FVehicleData>();
+    ActorData->AckermannControllerSettings = AckermannSettings;
+  }
+  else
+  {
+    auto Vehicle = Cast<ACarlaWheeledVehicle>(GetActor());
+    if (Vehicle == nullptr)
+    {
+      return ECarlaServerResponse::NotAVehicle;
+    }
+
+    Vehicle->ApplyAckermannControllerSettings(AckermannSettings);
   }
   return ECarlaServerResponse::Success;
 }
@@ -1098,12 +1214,15 @@ ECarlaServerResponse FWalkerActor::SetWalkerState(
 {
   FVector NewLocation = Transform.GetLocation();
   FVector CurrentLocation = GetActorGlobalLocation();
-  NewLocation.Z += 90.0f; // move point up because in Unreal walker is centered in the middle height
 
-  // if difference between Z position is small, then we keep current, otherwise we set the new one
-  // (to avoid Z fighting position and falling pedestrians)
-  if (NewLocation.Z - CurrentLocation.Z < 100.0f)
-    NewLocation.Z = CurrentLocation.Z;
+  // adjust position up by half of capsule height 
+  // (because in Unreal walker is centered at the capsule middle,
+  // while Recast uses the bottom point)
+  UCapsuleComponent* Capsule = Cast<UCapsuleComponent>(GetActor()->GetRootComponent());
+  if (Capsule)
+  {
+    NewLocation.Z += Capsule->GetScaledCapsuleHalfHeight();
+  }
 
   FTransform NewTransform = Transform;
   NewTransform.SetLocation(NewLocation);
@@ -1332,6 +1451,29 @@ ECarlaServerResponse FWalkerActor::GetPoseFromAnimation()
       return ECarlaServerResponse::WalkerIncompatibleController;
     }
     Controller->GetPoseFromAnimation();
+  }
+  return ECarlaServerResponse::Success;
+}
+
+ECarlaServerResponse FWalkerActor::SetActorDead()
+{
+  if (IsDormant())
+  {
+  }
+  else
+  {
+    auto Pawn = Cast<APawn>(GetActor());
+    if (Pawn == nullptr)
+    {
+      return ECarlaServerResponse::NotAWalker;
+    }
+    auto Walker = Cast<AWalkerBase>(Pawn);
+    if (Walker == nullptr)
+    {
+      return ECarlaServerResponse::NotAWalker;
+    }
+    Walker->StartDeathLifeSpan();
+    UE_LOG(LogCarla, Warning, TEXT("Walker starting life span by dead"));
   }
   return ECarlaServerResponse::Success;
 }

@@ -3,10 +3,17 @@
 
 #include <memory>
 
+#if defined(__clang__)
+#  pragma clang diagnostic push
+#  pragma clang diagnostic ignored "-Wshadow"
+#endif
 #include "boost/geometry.hpp"
 #include "boost/geometry/geometries/geometries.hpp"
 #include "boost/geometry/geometries/point_xy.hpp"
 #include "boost/geometry/geometries/polygon.hpp"
+#if defined(__clang__)
+#  pragma clang diagnostic pop
+#endif
 
 #include "carla/trafficmanager/DataStructures.h"
 #include "carla/trafficmanager/Parameters.h"
@@ -57,7 +64,7 @@ private:
   // to avoid repeated computation within a cycle.
   GeometryComparisonMap geometry_cache;
   GeodesicBoundaryMap geodesic_boundary_map;
-  RandomGeneratorMap &random_devices;
+  RandomGenerator &random_device;
 
   // Method to determine if a vehicle is on a collision path to another.
   std::pair<bool, float> NegotiateCollision(const ActorId reference_vehicle_id,
@@ -90,7 +97,7 @@ public:
                  const TrackTraffic &track_traffic,
                  const Parameters &parameters,
                  CollisionFrame &output_array,
-                 RandomGeneratorMap &random_devices);
+                 RandomGenerator &random_device);
 
   void Update (const unsigned long index) override;
 
