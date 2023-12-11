@@ -15,6 +15,7 @@ Plugins/Carla/Saved
 
 /Content/*
 !/Content/simple_car
+!Content/Carla/Blueprints/Vehicles/VehicleFactory.uasset
 Config/CarlaSettings.ini
 Config/DefaultEditor.ini
 Config/CarSimConfig.ini
